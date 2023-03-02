@@ -1,0 +1,103 @@
+version: '3.9'
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: ./deploy/Dockerfile
+    image: fast_api:${FAST_API_VERSION:-latest}
+    restart: always
+    env_file:
+    - .env
+    labels:
+      # Enables traefik for this container.
+    - traefik.enable=true
+    - traefik.http.routers.fast_api.rule=Host(`${FAST_API_TRAEFIK_HOST:-fast_api.localhost}`)
+    - traefik.http.routers.fast_api.entrypoints=http
+    - traefik.http.routers.fast_api.service=fast_api
+    - traefik.http.services.fast_api.loadbalancer.server.port=${FAST_API_PORT:-8000}
+    networks:
+    - default
+    - traefik-shared
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rmq:
+        condition: service_healthy
+    environment:
+      FAST_API_HOST: 0.0.0.0
+      FAST_API_DB_HOST: fast_api-db
+      FAST_API_DB_PORT: 5432
+      FAST_API_DB_USER: fast_api
+      FAST_API_DB_PASS: fast_api
+      FAST_API_DB_BASE: fast_api
+      FAST_API_RABBIT_HOST: fast_api-rmq
+
+  db:
+    image: postgres:13.8-bullseye
+    hostname: fast_api-db
+    environment:
+      POSTGRES_PASSWORD: "fast_api"
+      POSTGRES_USER: "fast_api"
+      POSTGRES_DB: "fast_api"
+    volumes:
+    - fast_api-db-data:/var/lib/postgresql/data
+    restart: always
+    healthcheck:
+      test: pg_isready -U fast_api
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  migrator:
+    image: fast_api:${FAST_API_VERSION:-latest}
+    restart: "no"
+    command: alembic upgrade head
+    environment:
+      FAST_API_DB_HOST: fast_api-db
+      FAST_API_DB_PORT: 5432
+      FAST_API_DB_USER: fast_api
+      FAST_API_DB_PASS: fast_api
+      FAST_API_DB_BASE: fast_api
+    depends_on:
+      db:
+        condition: service_healthy
+
+  redis:
+    image: bitnami/redis:6.2.5
+    hostname: "fast_api-redis"
+    restart: always
+    environment:
+      ALLOW_EMPTY_PASSWORD: "yes"
+    healthcheck:
+      test: redis-cli ping
+      interval: 1s
+      timeout: 3s
+      retries: 50
+
+  rmq:
+    image: rabbitmq:3.9.16-alpine
+    hostname: "fast_api-rmq"
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: "guest"
+      RABBITMQ_DEFAULT_PASS: "guest"
+      RABBITMQ_DEFAULT_VHOST: "/"
+    healthcheck:
+      test: rabbitmq-diagnostics check_running -q
+      interval: 3s
+      timeout: 3s
+      retries: 50
+
+
+
+volumes:
+  fast_api-db-data:
+    name: fast_api-db-data
+
+networks:
+  # Network for traefik.
+  traefik-shared:
+    name: traefik-shared
