@@ -31,8 +31,7 @@ class DummyDAO:
         :return: stream of dummies.
         """
         raw_dummies = await self.session.execute(
-            # select(DummyModel).limit(limit).offset(offset),
-            select(DummyModel).limit(limit),
+            select(DummyModel).limit(limit).offset(offset),
         )
 
         return list(raw_dummies.scalars().fetchall())
